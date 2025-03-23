@@ -1,0 +1,14 @@
+certificados-ponedera/
+├── functions/                  
+│   ├── src/                    
+│   │    └── index.js           # Código del backend
+│   ├── package.json            
+├── public/                     
+├── src/                        
+│   ├── components/             
+│   │    ├── Generador.js       # Generación de certificados
+│   │    └── Validador.js       # Validación de certificados
+│   ├── App.js                  
+│   └── index.js                
+├── firebase.json               
+└── .firebaserc                 
