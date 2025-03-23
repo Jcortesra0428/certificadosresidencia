@@ -12,3 +12,118 @@ certificados-ponedera/
 │   └── index.js                
 ├── firebase.json               
 └── .firebaserc                 
+{
+  "hosting": {
+    "public": "build",
+    "ignore": ["firebase.json", "**/.*", "**/node_modules/**"]
+  },
+  "functions": {
+    "source": "functions"
+  }
+}
+{
+  "name": "certificados-ponedera",
+  "engines": {
+    "node": "18"
+  },
+  "dependencies": {
+    "firebase-admin": "^11.10.1",
+    "firebase-functions": "^4.3.0",
+    "pdf-lib": "^1.17.1",
+    "qrcode": "^1.5.0"
+  }
+}
+const functions = require("firebase-functions");
+const admin = require("firebase-admin");
+const { PDFDocument, rgb } = require("pdf-lib");
+const QRCode = require("qrcode");
+
+admin.initializeApp();
+const db = admin.firestore();
+
+// Generar código único con formato CR-año-mes-día-###
+function generarCodigoUnico() {
+    const fecha = new Date();
+    const año = fecha.getFullYear();
+    const mes = String(fecha.getMonth() + 1).padStart(2, "0");
+    const dia = String(fecha.getDate()).padStart(2, "0");
+    const aleatorio = Math.floor(Math.random() * 900 + 100);
+    return `CR-${año}${mes}${dia}-${aleatorio}`;
+}
+
+// Generar certificado en PDF
+async function generarPDF(data) {
+    const pdfDoc = await PDFDocument.create();
+    const page = pdfDoc.addPage([600, 400]);
+    page.drawText("Certificado de Residencia", { x: 50, y: 350, size: 24, color: rgb(0, 0, 0) });
+    page.drawText(`Nombre: ${data.nombre}`, { x: 50, y: 300, size: 18 });
+    page.drawText(`Dirección: ${data.direccion}`, { x: 50, y: 270, size: 18 });
+    page.drawText(`Código: ${data.codigo}`, { x: 50, y: 240, size: 18 });
+    page.drawText(`Generado por: ${data.usuario}`, { x: 50, y: 210, size: 16 });
+
+    const qrCode = await QRCode.toDataURL(data.codigo);
+    const qrImage = await pdfDoc.embedPng(qrCode);
+    const qrDims = qrImage.scale(0.5);
+    page.drawImage(qrImage, { x: 50, y: 150, width: qrDims.width, height: qrDims.height });
+
+    const pdfBytes = await pdfDoc.save();
+    return pdfBytes;
+}
+
+exports.generarCertificado = functions.https.onRequest(async (req, res) => {
+    const { nombre, direccion, usuario } = req.query;
+    const codigo = generarCodigoUnico();
+
+    try {
+        const pdfBytes = await generarPDF({ nombre, direccion, codigo, usuario });
+        await db.collection("certificados").doc(codigo).set({ nombre, direccion, codigo, usuario, valido: true });
+        res.setHeader("Content-Type", "application/pdf");
+        res.setHeader("Content-Disposition", `attachment; filename=${codigo}.pdf`);
+        res.send(Buffer.from(pdfBytes));
+    } catch (error) {
+        res.status(500).send("Error al generar el certificado.");
+    }
+});
+
+exports.validarCertificado = functions.https.onRequest(async (req, res) => {
+    const { codigo } = req.query;
+
+    try {
+        const doc = await db.collection("certificados").doc(codigo).get();
+        if (!doc.exists) {
+            return res.json({ valid: false, message: "Certificado no encontrado." });
+        }
+        const data = doc.data();
+        res.json({ valid: data.valido, message: "Certificado válido." });
+    } catch (error) {
+        res.status(500).send("Error al validar el certificado.");
+    }
+});
+import React, { useState } from 'react';
+
+function App() {
+    const [codigo, setCodigo] = useState('');
+    const [mensaje, setMensaje] = useState('');
+
+    const validarCertificado = async () => {
+        const response = await fetch(`https://REGION-PROYECTO.cloudfunctions.net/validarCertificado?codigo=${codigo}`);
+        const data = await response.json();
+        setMensaje(data.message);
+    };
+
+    return (
+        <div className="App">
+            <h1>Validación de Certificados</h1>
+            <input
+                type="text"
+                placeholder="Ingrese el código"
+                value={codigo}
+                onChange={(e) => setCodigo(e.target.value)}
+            />
+            <button onClick={validarCertificado}>Validar</button>
+            {mensaje && <p>{mensaje}</p>}
+        </div>
+    );
+}
+
+export default App;
